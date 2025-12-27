@@ -2,6 +2,13 @@ import random
 import time
 import threading
 import requests
+import os
+from requests.exceptions import RequestException
+
+# TOR defaults
+TOR_SOCKS_PORT = int(os.environ.get("TOR_SOCKS_PORT", 9050))
+TOR_PROXY = f"socks5h://127.0.0.1:{TOR_SOCKS_PORT}"
+
 
 # =========================
 # Global pause gate (shared by all threads)
@@ -71,11 +78,17 @@ class ScraperClient:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
     ]
 
-    def __init__(self, timeout: int = 15, max_retries: int = 3, backoff_base: float = 0.7):
+    def __init__(self, timeout: int = 15, max_retries: int = 3, backoff_base: float = 0.7, use_tor: bool = True):
         self.session = requests.Session()
         self.timeout = timeout
         self.max_retries = max_retries
         self.backoff_base = backoff_base
+        self.use_tor = use_tor
+        if self.use_tor:
+            self.session.proxies = {
+                "http": TOR_PROXY,
+                "https": TOR_PROXY,
+            }
 
     def _headers(self) -> dict:
         return {
@@ -87,6 +100,7 @@ class ScraperClient:
 
     def get(self, url: str) -> requests.Response:
         last_exc = None
+        # NOTE: All requests are routed through Tor if use_tor is True
 
         for attempt in range(1, self.max_retries + 1):
             # ⏸ respect global pause before every request

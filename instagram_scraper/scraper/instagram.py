@@ -1,4 +1,5 @@
 from .client import ScraperClient, trigger_global_pause
+from .tor_control import TorController
 from .parsers import parse_stories_request, parse_profile_request
 from instagram_scraper.services.profile_saver import save_profile
 from instagram_scraper.services.story_saver import save_stories
@@ -17,8 +18,10 @@ def scrape_instagram(username: str):
 
     # ✅ BLOCK DETECTION
     if "temporarily blocked" in msg:
-        # pause everyone for e.g. 90–150 seconds (with jitter)
+        # pause everyone and rotate Tor IP (new circuit)
         pause_s = 1 + int(__import__("random").uniform(0, 5))
+        tor = TorController()
+        tor.new_identity()  # Request a new Tor IP
         trigger_global_pause(pause_s)
         return {
             "username": username,

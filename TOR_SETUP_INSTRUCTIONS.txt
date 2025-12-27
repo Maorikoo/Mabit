@@ -1,0 +1,236 @@
+# TOR Setup & Usage Instructions
+
+Complete guide to set up Tor as a background service for anonymous Instagram scraping with automatic IP rotation.
+
+---
+
+## 1. Install Python Dependencies
+
+Make sure you have a virtual environment activated, then run:
+
+    pip install -r Mabit/requirements.txt
+
+This installs all required packages including `stem` and `PySocks` for Tor integration.
+
+---
+
+## 2. Download Tor Expert Bundle
+
+### Step 1: Download
+- Go to: https://www.torproject.org/download/tor/
+- Under "OS (Architecture)" → "Windows (x86_64)" → **Stable** column
+- Click the download link (e.g., `tor-expert-bundle-windows-x86_64-15.0.3.tar` or `.zip`)
+- **Important:** Download the **Stable** version, NOT the Alpha version
+
+### Step 2: Extract to a Simple Location
+- **Extract the downloaded file** (`.tar` or `.zip`) to:
+  ```
+  C:\TorService
+  ```
+- **IMPORTANT:** Use a path with ONLY English characters (no Unicode/non-ASCII characters like Hebrew, Arabic, etc.)
+- You can use Windows built-in `tar` command or 7-Zip to extract
+
+### Step 3: Verify Folder Structure
+After extraction, you should have:
+```
+C:\TorService\
+  ├── tor\
+  │   └── tor.exe          ← The Tor executable
+  ├── data\
+  │   └── torrc             ← Configuration file (may need to create)
+  └── (other Tor files)
+```
+
+**Note:** If you see `torrc-defaults` in the `data` folder, that's normal. You'll create your own `torrc` file next.
+
+---
+
+## 3. Generate Tor Control Password Hash
+
+### Step 1: Open Command Prompt
+- Navigate to your Tor folder:
+  ```cmd
+  cd C:\TorService\tor
+  ```
+
+### Step 2: Generate Hash
+- Run (replace `yourpassword` with a password of your choice):
+  ```cmd
+  tor.exe --hash-password yourpassword
+  ```
+- **Copy the output** - it will look like:
+  ```
+  16:C7C47C1A1B8EFAF960D1D5AE707C13AF3267615074CB1E22AA6EA8B3AC
+  ```
+- **Save your plain password** (the one you typed, e.g., `yourpassword`) - you'll need it for Python scripts!
+
+---
+
+## 4. Create/Edit torrc Configuration File
+
+### Step 1: Create or Edit torrc
+- Navigate to: `C:\TorService\data\`
+- **If `torrc` doesn't exist:** Create a new text file named `torrc` (no extension)
+- **If `torrc-defaults` exists:** You can copy it and rename to `torrc`, or create a new one
+
+### Step 2: Add Configuration
+Open `C:\TorService\data\torrc` in a text editor (Notepad is fine) and add these lines:
+
+```
+SocksPort 9050
+ControlPort 9051
+HashedControlPassword 16:YOUR_HASH_HERE
+```
+
+**Replace `16:YOUR_HASH_HERE`** with the hash you generated in Step 3.
+
+**Example:**
+```
+SocksPort 9050
+ControlPort 9051
+HashedControlPassword 16:C7C47C1A1B8EFAF960D1D5AE707C13AF3267615074CB1E22AA6EA8B3AC
+```
+
+### Step 3: Remove/Comment Out Unwanted Lines
+- If you see `CookieAuthentication 1`, comment it out or delete it:
+  ```
+  #CookieAuthentication 1
+  ```
+- If you see `DisableNetwork 1`, comment it out or delete it:
+  ```
+  #DisableNetwork 1
+  ```
+
+### Step 4: Save the File
+- Save `torrc` in `C:\TorService\data\torrc`
+
+---
+
+## 5. Configure Python Scripts with Your Password
+
+### Edit `tor_setup_and_test.py`
+- Open `Mabit/tor_setup_and_test.py`
+- Find the line:
+  ```python
+  TOR_CONTROL_PASSWORD = "yourpassword"
+  ```
+- **Replace `"yourpassword"`** with the **plain password** you used when generating the hash (NOT the hash itself!)
+
+**Example:**
+```python
+TOR_CONTROL_PASSWORD = "mysecret123"  # Your actual password
+```
+
+### Edit `instagram_scraper/scraper/instagram.py` (if needed)
+- The scraper also uses TorController - make sure it uses the password when creating instances
+- Check that `tor_control.py` is set up to use password authentication
+
+---
+
+## 6. Start Tor Service
+
+### Option A: Automatic (Recommended)
+Run the startup script:
+
+    python Mabit/start_tor_service.py
+
+This will:
+- Check if Tor is already running
+- Start Tor in the background
+- Wait for the SOCKS proxy to be ready
+- Display "Tor SOCKS proxy is ready." when done
+
+### Option B: Manual
+If you prefer to start Tor manually:
+1. Open Command Prompt **as Administrator**
+2. Navigate to: `cd C:\TorService\tor`
+3. Run: `tor.exe -f ..\data\torrc`
+4. Keep the window open (or run in background)
+
+---
+
+## 7. Test Your Setup
+
+After Tor is running, test everything:
+
+    python Mabit/tor_setup_and_test.py
+
+**Expected Output:**
+```
+=== Tor Setup & Test Utility ===
+[Tor Setup] Checking for Tor and required ports...
+[Tor Setup] Tor SOCKS proxy is running on port 9050.
+[Tor Setup] Tor Control port is running on 9051 (required for IP switching).
+[Tor Setup] Testing initial Tor IP (should be different from your real IP)...
+[Tor Setup]  Tor IP: 185.220.101.153
+[Tor Setup] Requesting new circuit (new Tor exit IP)...
+[Tor Setup] Testing Tor IP after circuit change:
+[Tor Setup]  Tor IP: 195.47.238.91
+[Tor Setup] If both tests returned IPs, Tor + circuit change are working!
+```
+
+**Success Indicators:**
+- ✅ Both SOCKS and ControlPort detected
+- ✅ Two different IP addresses shown (before and after circuit change)
+- ✅ No errors
+
+---
+
+## 8. Use Your Scraper
+
+Once Tor is running and tested, you can use your Instagram scraper normally:
+
+    python Mabit/manage.py scrape_users --file users.txt
+
+**What happens automatically:**
+- All requests go through Tor (anonymous)
+- If you get blocked, the scraper automatically requests a new Tor circuit (new IP)
+- After a short pause, scraping continues with the new IP
+
+---
+
+## Troubleshooting
+
+### Tor Won't Start / "Access Denied" Error
+- **Solution:** Run PowerShell/Command Prompt **as Administrator**
+- Or check Windows Defender/Antivirus isn't blocking `tor.exe`
+
+### "Tor executable not found" Error
+- **Check:** Verify `tor.exe` is at `C:\TorService\tor\tor.exe`
+- **Fix:** Update `TOR_DIR` in `start_tor_service.py` if your path is different
+
+### "torrc file not found" Error
+- **Check:** Verify `torrc` is at `C:\TorService\data\torrc`
+- **Fix:** Create the file if it doesn't exist (see Step 4)
+
+### Unicode/Encoding Errors
+- **Cause:** Tor data directory has non-ASCII characters (Hebrew, Arabic, etc.)
+- **Solution:** ALWAYS use a path with ONLY English characters (e.g., `C:\TorService`, NOT `C:\Users\...\מסמכים\...`)
+
+### "ControlPort NOT detected" Error
+- **Check:** Verify `ControlPort 9051` is in your `torrc` file
+- **Check:** Verify `HashedControlPassword` is set correctly
+- **Fix:** Restart Tor after editing `torrc`
+
+### Extraction Errors
+- **If `.tar` file won't extract:** Use 7-Zip (free download: https://www.7-zip.org/)
+- **If `.zip` file won't extract:** Try Windows built-in extractor or 7-Zip
+
+### Password Authentication Fails
+- **Check:** Make sure you're using the **plain password** in Python scripts (NOT the hash)
+- **Check:** The hash in `torrc` matches what you generated
+- **Fix:** Re-generate hash and update both `torrc` and Python scripts
+
+---
+
+## Summary Checklist
+
+- [ ] Python dependencies installed (`pip install -r Mabit/requirements.txt`)
+- [ ] Tor Expert Bundle downloaded and extracted to `C:\TorService`
+- [ ] Password hash generated and saved
+- [ ] `torrc` file created at `C:\TorService\data\torrc` with correct settings
+- [ ] `TOR_CONTROL_PASSWORD` set in `tor_setup_and_test.py`
+- [ ] Tor service started successfully (`python Mabit/start_tor_service.py`)
+- [ ] Test passed with IP rotation working
+
+**Once all checkboxes are complete, you're ready to scrape anonymously with automatic IP rotation!**
