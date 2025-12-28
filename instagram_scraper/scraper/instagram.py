@@ -6,7 +6,7 @@ from instagram_scraper.services.story_saver import save_stories
 
 BASE_URL = "https://media.mollygram.com/"
 
-def scrape_instagram(username: str):
+def scrape_instagram(username: str, log_callback=None):
     client = ScraperClient()
 
     profile_url = f"{BASE_URL}?url={username}"
@@ -42,7 +42,11 @@ def scrape_instagram(username: str):
     stories_response = client.get(stories_url)
     stories = parse_stories_request(stories_response.text)
 
-    saved_count = save_stories(username, stories)
+    # Log starting to download stories if there are any
+    if stories and log_callback:
+        log_callback(f"{username} public, starting to download stories")
+
+    saved_count = save_stories(username, stories, log_callback=log_callback)
 
     return {
         "username": username,

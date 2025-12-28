@@ -3,12 +3,13 @@ from django.utils import timezone
 from instagram_scraper.models import InstagramUser, InstagramStory
 from .media_downloader import download_media
 
-def save_stories(username: str, stories: list[dict]):
+def save_stories(username: str, stories: list[dict], log_callback=None):
     if not stories:
-        return
+        return 0
 
     user = InstagramUser.objects.get(username=username)
     saved = 0
+    
     for story in stories:
         story_id = story["story_id"]
 
@@ -23,7 +24,11 @@ def save_stories(username: str, stories: list[dict]):
 
 
         ext = "jpg" if story["media_type"] == "image" else "mp4"
-        filename = f"{user.username}_{story_id}.{ext}"
+        filename = f"{user.username}-{ts_str}-{story_id}.{ext}"
+
+        # Log download start
+        if log_callback:
+            log_callback(f"downloaded {filename}")
 
         file = download_media(story["media_url"], filename)
         if not file:

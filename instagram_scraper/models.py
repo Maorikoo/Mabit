@@ -22,7 +22,9 @@ class InstagramStory(models.Model):
     timestamp = models.DateTimeField()
 
     def __str__(self):
-        return f"{self.username.username} - {self.story_id}"
+        # Format timestamp to match filename format: dd.mm.yy_HH.MM
+        ts_str = self.timestamp.strftime("%d.%m.%y_%H.%M")
+        return f"{self.username.username}-{ts_str}-{self.story_id}"
 
     class Meta:
         verbose_name = "Instagram Story"

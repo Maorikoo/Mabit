@@ -58,7 +58,16 @@ class Command(BaseCommand):
         def scrape_with_thread_info(username):
             """Wrapper to capture thread info and return it with the result"""
             thread_num = get_thread_number()
-            result = scrape_instagram(username)
+            
+            # Create logging callback that includes thread info and progress
+            def log_message(message):
+                # Use done_users (not incremented yet) for the progress display
+                current_progress = done_users
+                self.stdout.write(self.style.SUCCESS(
+                    f"[{current_progress}/{total_users}] [Thread {thread_num}] [OK] {message}"
+                ))
+            
+            result = scrape_instagram(username, log_callback=log_message)
             if isinstance(result, dict):
                 result['_thread_num'] = thread_num
             return result
