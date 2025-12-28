@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from django.core.management.base import BaseCommand
 from instagram_scraper.scraper.instagram import scrape_instagram
 from instagram_scraper.scraper.client import wait_for_pause_to_end, get_pause_remaining_seconds
+import threading
 
 
 class Command(BaseCommand):
@@ -40,6 +41,28 @@ class Command(BaseCommand):
         # pending usernames queue
         pending = list(usernames)
 
+        # Thread tracking - assign sequential numbers to threads
+        thread_counter = 0
+        thread_lock = threading.Lock()
+        thread_ids = {}  # thread_ident -> thread_number
+        
+        def get_thread_number():
+            thread_ident = threading.get_ident()
+            if thread_ident not in thread_ids:
+                nonlocal thread_counter
+                with thread_lock:
+                    thread_counter += 1
+                    thread_ids[thread_ident] = thread_counter
+            return thread_ids[thread_ident]
+        
+        def scrape_with_thread_info(username):
+            """Wrapper to capture thread info and return it with the result"""
+            thread_num = get_thread_number()
+            result = scrape_instagram(username)
+            if isinstance(result, dict):
+                result['_thread_num'] = thread_num
+            return result
+
         with ThreadPoolExecutor(max_workers=workers) as ex:
             while pending:
                 # Respect any active pause before submitting more work
@@ -55,7 +78,7 @@ class Command(BaseCommand):
                     attempts[u] += 1
                     batch.append(u)
 
-                future_map = {ex.submit(scrape_instagram, u): u for u in batch}
+                future_map = {ex.submit(scrape_with_thread_info, u): u for u in batch}
 
                 for fut in as_completed(future_map):
                     u = future_map[fut]
@@ -65,14 +88,16 @@ class Command(BaseCommand):
                         if not isinstance(res, dict):
                             results["failed"] += 1
                             done_users += 1
+                            thread_num = get_thread_number()
                             self.stdout.write(self.style.ERROR(
-                                f"[{done_users}/{total_users}] [FAIL] {u}: bad result type"
+                                f"[{done_users}/{total_users}] [Thread {thread_num}] [FAIL] {u}: bad result type"
                             ))
                             continue
 
                         profile = res.get("profile", "unknown")
                         sf = int(res.get("stories_found", 0) or 0)
                         ss = int(res.get("stories_saved", 0) or 0)
+                        thread_num = res.get("_thread_num", get_thread_number())
 
                         # ✅ BLOCKED -> retry without incrementing done_users
                         if profile == "blocked":
@@ -81,7 +106,7 @@ class Command(BaseCommand):
                                 pause_s = res.get("pause_seconds", "?")
                                 total_attempts_allowed = blocked_retries + 1
                                 self.stdout.write(self.style.WARNING(
-                                    f"[{done_users}/{total_users}] [BLOCKED] {u} "
+                                    f"[{done_users}/{total_users}] [Thread {thread_num}] [BLOCKED] {u} "
                                     f"(attempt {attempts[u]}/{total_attempts_allowed}) -> pausing {pause_s}s, "
                                     f"will retry (left={retries_left[u]})"
                                 ))
@@ -91,7 +116,7 @@ class Command(BaseCommand):
                                 results["skipped"] += 1
                                 done_users += 1
                                 self.stdout.write(self.style.WARNING(
-                                    f"[{done_users}/{total_users}] [SKIP] {u} blocked (no retries left)"
+                                    f"[{done_users}/{total_users}] [Thread {thread_num}] [SKIP] {u} blocked (no retries left)"
                                 ))
                             continue
 
@@ -101,12 +126,12 @@ class Command(BaseCommand):
                             done_users += 1
                             if sf == 0:
                                 self.stdout.write(self.style.SUCCESS(
-                                    f"[{done_users}/{total_users}] [OK] {u} public, no stories "
+                                    f"[{done_users}/{total_users}] [Thread {thread_num}] [OK] {u} public, no stories "
                                     f"(attempt {attempts[u]}/{blocked_retries + 1})"
                                 ))
                             else:
                                 self.stdout.write(self.style.SUCCESS(
-                                    f"[{done_users}/{total_users}] [OK] {u} public, stories found={sf}, saved={ss} "
+                                    f"[{done_users}/{total_users}] [Thread {thread_num}] [OK] {u} public, stories found={sf}, saved={ss} "
                                     f"(attempt {attempts[u]}/{blocked_retries + 1})"
                                 ))
 
@@ -114,7 +139,7 @@ class Command(BaseCommand):
                             results["skipped"] += 1
                             done_users += 1
                             self.stdout.write(self.style.WARNING(
-                                f"[{done_users}/{total_users}] [SKIP] {u} not found "
+                                f"[{done_users}/{total_users}] [Thread {thread_num}] [SKIP] {u} not found "
                                 f"(attempt {attempts[u]}/{blocked_retries + 1})"
                             ))
 
@@ -122,15 +147,16 @@ class Command(BaseCommand):
                             results["skipped"] += 1
                             done_users += 1
                             self.stdout.write(self.style.WARNING(
-                                f"[{done_users}/{total_users}] [SKIP] {u} is {profile} (skipping stories) "
+                                f"[{done_users}/{total_users}] [Thread {thread_num}] [SKIP] {u} is {profile} (skipping stories) "
                                 f"(attempt {attempts[u]}/{blocked_retries + 1})"
                             ))
 
                     except Exception as e:
                         results["failed"] += 1
                         done_users += 1
+                        thread_num = get_thread_number()
                         self.stdout.write(self.style.ERROR(
-                            f"[{done_users}/{total_users}] [FAIL] {u}: {e} "
+                            f"[{done_users}/{total_users}] [Thread {thread_num}] [FAIL] {u}: {e} "
                             f"(attempt {attempts[u]}/{blocked_retries + 1})"
                         ))
 
