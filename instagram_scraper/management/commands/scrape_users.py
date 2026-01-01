@@ -41,19 +41,23 @@ class Command(BaseCommand):
         # pending usernames queue
         pending = list(usernames)
 
-        # Thread tracking - assign sequential numbers to threads
-        thread_counter = 0
+        # Thread tracking - assign sequential numbers to worker threads only
+        # Map thread identifiers to worker numbers (1 to workers)
         thread_lock = threading.Lock()
-        thread_ids = {}  # thread_ident -> thread_number
+        thread_ids = {}  # thread_ident -> worker_number (1-based)
+        worker_counter = 0  # Count of unique worker threads seen
         
         def get_thread_number():
+            """Get worker thread number (1 to workers), or 0 for main thread"""
             thread_ident = threading.get_ident()
             if thread_ident not in thread_ids:
-                nonlocal thread_counter
+                nonlocal worker_counter
                 with thread_lock:
-                    thread_counter += 1
-                    thread_ids[thread_ident] = thread_counter
-            return thread_ids[thread_ident]
+                    # Only assign numbers to worker threads (not main thread)
+                    # Wrap around if somehow we get more threads than workers
+                    worker_counter += 1
+                    thread_ids[thread_ident] = ((worker_counter - 1) % workers) + 1
+            return thread_ids.get(thread_ident, 0)  # Return 0 for main thread if not in map
         
         def scrape_with_thread_info(username):
             """Wrapper to capture thread info and return it with the result"""
@@ -126,6 +130,28 @@ class Command(BaseCommand):
                                 done_users += 1
                                 self.stdout.write(self.style.WARNING(
                                     f"[{done_users}/{total_users}] [Thread {thread_num}] [SKIP] {u} blocked (no retries left)"
+                                ))
+                            continue
+
+                        # ✅ ERROR -> simple retry without pause/circuit rotation
+                        # Just retry the request - sometimes website returns temporary errors
+                        if profile == "error":
+                            if retries_left.get(u, 0) > 0:
+                                retries_left[u] -= 1
+                                total_attempts_allowed = blocked_retries + 1
+                                self.stdout.write(self.style.WARNING(
+                                    f"[{done_users}/{total_users}] [Thread {thread_num}] [ERROR] {u} "
+                                    f"(attempt {attempts[u]}/{total_attempts_allowed}) -> will retry (left={retries_left[u]})"
+                                ))
+                                # Small delay before retry (no pause, no circuit rotation)
+                                import time
+                                time.sleep(1)  # Just a small delay
+                                pending.append(u)
+                            else:
+                                results["skipped"] += 1
+                                done_users += 1
+                                self.stdout.write(self.style.WARNING(
+                                    f"[{done_users}/{total_users}] [Thread {thread_num}] [SKIP] {u} error after {blocked_retries + 1} attempts (assuming user doesn't exist)"
                                 ))
                             continue
 

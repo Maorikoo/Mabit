@@ -1,9 +1,12 @@
 import random
 import time
 import threading
+import logging
 import requests
 import os
 from requests.exceptions import RequestException
+
+logger = logging.getLogger(__name__)
 
 # TOR defaults
 TOR_SOCKS_PORT = int(os.environ.get("TOR_SOCKS_PORT", 9050))
@@ -15,6 +18,12 @@ TOR_PROXY = f"socks5h://127.0.0.1:{TOR_SOCKS_PORT}"
 # =========================
 _PAUSE_LOCK = threading.Lock()
 _PAUSE_UNTIL = 0.0  # monotonic timestamp
+
+# =========================
+# Circuit rotation lock (only one thread rotates at a time)
+# =========================
+_CIRCUIT_ROTATION_LOCK = threading.Lock()
+_CIRCUIT_ROTATION_IN_PROGRESS = False
 
 
 def _maybe_pause():
@@ -29,6 +38,10 @@ def _maybe_pause():
         if remaining <= 0:
             return
 
+        # Log only once per pause period to avoid spam
+        if remaining > 0.5:  # Only log if more than 0.5 seconds remaining
+            logger.debug(f"[PAUSE] Waiting {remaining:.1f}s before next request...")
+        
         time.sleep(min(remaining, 1.0))
 
 
@@ -43,6 +56,7 @@ def trigger_global_pause(seconds: int):
     with _PAUSE_LOCK:
         if until > _PAUSE_UNTIL:
             _PAUSE_UNTIL = until
+            logger.info(f"[PAUSE] Global pause activated for {seconds} seconds - all threads will wait")
 
 
 def get_pause_remaining_seconds() -> int:
@@ -54,11 +68,58 @@ def get_pause_remaining_seconds() -> int:
 
 def wait_for_pause_to_end():
     """Block until the global pause is finished."""
+    initial_remaining = get_pause_remaining_seconds()
+    if initial_remaining > 0:
+        logger.info(f"[PAUSE] Waiting for global pause to end ({initial_remaining}s remaining)...")
+    
     while True:
         remaining = get_pause_remaining_seconds()
         if remaining <= 0:
+            if initial_remaining > 0:
+                logger.info("[PAUSE] Global pause ended, resuming work")
             return
         time.sleep(min(remaining, 1))
+
+
+def rotate_circuit_if_needed(log_callback=None):
+    """
+    Rotate Tor circuit if not already in progress.
+    Only one thread will perform the rotation, others will return False immediately.
+    Returns True if this thread performed the rotation, False if another thread is doing it.
+    """
+    global _CIRCUIT_ROTATION_IN_PROGRESS
+    log_msg = log_callback if callable(log_callback) else logger.info
+    
+    # Try to acquire the lock - only one thread will succeed immediately
+    acquired = _CIRCUIT_ROTATION_LOCK.acquire(blocking=False)
+    
+    if not acquired:
+        # Another thread is already rotating - return False immediately
+        # The calling thread will handle waiting 60 seconds
+        return False
+    
+    # This thread will perform the rotation
+    try:
+        _CIRCUIT_ROTATION_IN_PROGRESS = True
+        log_msg("[TOR] This thread will rotate the circuit (others will wait 60s)...")
+        
+        # Get password from settings
+        import os
+        from django.conf import settings
+        tor_password = os.environ.get('TOR_CONTROL_PASSWORD') or getattr(settings, 'TOR_CONTROL_PASSWORD', None)
+        
+        if not tor_password:
+            raise ValueError("TOR_CONTROL_PASSWORD not configured. Set it in settings.py or environment variable.")
+        
+        # Perform the rotation
+        from .tor_control import TorController
+        tor = TorController(password=tor_password)
+        tor.new_identity(log_callback=log_callback)
+        
+        return True
+    finally:
+        _CIRCUIT_ROTATION_IN_PROGRESS = False
+        _CIRCUIT_ROTATION_LOCK.release()
 
 
 # =========================

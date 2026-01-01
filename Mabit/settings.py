@@ -124,3 +124,8 @@ STATIC_URL = 'static/'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'instagram_scraper', 'media')
+
+# Tor Control Configuration
+# Set TOR_CONTROL_PASSWORD environment variable, or set it here directly
+# For security, prefer using environment variable: set TOR_CONTROL_PASSWORD=yourpassword
+TOR_CONTROL_PASSWORD = os.environ.get('TOR_CONTROL_PASSWORD', 'yourpassword')
