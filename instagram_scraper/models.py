@@ -21,6 +21,12 @@ class InstagramStory(models.Model):
     media_type = models.CharField(max_length=20,choices=[("image", "Image"), ("video", "Video")])
     timestamp = models.DateTimeField()
 
+        # --- AI fields (minimal) ---
+    ai_caption = models.TextField(blank=True, default="")                 # image caption OR joined video frame captions
+    ai_hits = models.JSONField(blank=True, default=list)                  # ["soldier", ...]
+    ai_is_interesting = models.BooleanField(null=True, blank=True)        # null = not analyzed yet
+    ai_analyzed_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
         # Format timestamp to match filename format: dd.mm.yy_HH.MM
         ts_str = self.timestamp.strftime("%d.%m.%y_%H.%M")
